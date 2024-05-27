@@ -152,7 +152,7 @@ __unit_callback void unit_render(const float * in, float * out, uint32_t frames)
         float combSum;
         LCWInputCombLines(&combSum, xL2, &reverbBlock);
 
-        const float wL = LCWInputAllPass2(combSum * 0.25f, &reverbBlock);
+        const float wL = LCWInputAllPass2(combSum, &reverbBlock);
         const float yL = softclip( (dry * xL) + (wet * wL) );
 
         out_p[0] = yL;

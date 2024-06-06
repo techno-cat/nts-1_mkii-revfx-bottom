@@ -13,7 +13,7 @@ extern "C" {
 
 typedef struct {
     LCWDelayBuffer preBuffer;
-    LCWDelayBuffer combBuffers;
+    LCWDelayBuffer combBuffer;
     LCWDelayBuffer apBuffers[LCW_REVERB_AP_MAX];
     // parameter
     float combFbGain[LCW_REVERB_COMB_MAX];

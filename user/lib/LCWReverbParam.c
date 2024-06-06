@@ -11,7 +11,7 @@ const int32_t lcwCombDelaySize[LCW_REVERB_COMB_MAX] = {
 
 const float lcwReverbGainTable[LCW_REVERB_GAIN_TABLE_SIZE][LCW_REVERB_COMB_MAX] = {
     { .0f, .0f, .0f, .0f }, // [ 0]
-//1693, 1759, 1823, 1907
+// 1693, 1759, 1823, 1907
     { 0.893216, 0.889292, 0.885504, 0.880556 }, // [ 1] 2.158
     { 0.900610, 0.896942, 0.893400, 0.888772 }, // [ 2] 2.327
     { 0.907520, 0.904093, 0.900783, 0.896456 }, // [ 3] 2.511

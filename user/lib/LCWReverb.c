@@ -27,17 +27,15 @@ void LCWInitCombBuffer(LCWReverbBlock *block, float *buffer)
 
 void LCWInitApBuffer(LCWReverbBlock *block, float *buffer)
 {
-    for (int32_t i=0; i<LCW_REVERB_AP_MAX; i++) {
-        LCWDelayBuffer *p = block->apBuffers + i;
-        p->buffer = &(buffer[LCW_REVERB_AP_SIZE * i]);
-        p->size = LCW_REVERB_AP_SIZE;
-        p->mask = LCW_REVERB_AP_SIZE - 1;
-        p->pointer = 0;
-    }
+    LCWDelayBuffer *p = &(block->apBuffer);
+    p->buffer = buffer;
+    p->size = LCW_REVERB_COMB_BUFFER_TOTAL;
+    p->mask = LCW_REVERB_AP_SIZE - 1;
+    p->pointer = 0;
 }
 
 #define FIR_TAP_PREPARE (9)
-float LCWInputPreBuffer(float in, LCWReverbBlock *block)
+void LCWInputPreBuffer(float *out, const float *in, LCWReverbBlock *block)
 {
     // HPF, fc: 0.094, window: kaiser(3.395)
     const float fir[] = {
@@ -46,19 +44,37 @@ float LCWInputPreBuffer(float in, LCWReverbBlock *block)
 
     LCWDelayBuffer *buf = &(block->preBuffer);
     buf->pointer = LCW_DELAY_BUFFER_DEC(buf);
-    buf->buffer[buf->pointer] = in;
+    buf->buffer[buf->pointer] = in[0] + in[1];
 
     const uint32_t mask = buf->mask;
     const float *p = buf->buffer;
     const int32_t j = buf->pointer;
     const float *param = &(fir[0]);
 
-    float out = 0.f;
-    for (int32_t k=0; k<FIR_TAP_PREPARE; k++) {
-        out += (p[(j+k) & mask] * param[k]);
-    }
+    float zz = 0.f;
+#if FIR_TAP_PREPARE == 9
+    {
+        const float src[] = {
+            p[(j+0) & mask] + p[(j+8) & mask],
+            p[(j+1) & mask] + p[(j+7) & mask],
+            p[(j+2) & mask] + p[(j+6) & mask],
+            p[(j+3) & mask] + p[(j+5) & mask],
+            p[(j+4) & mask]
+        };
 
-    return out;
+        zz += (src[0] * param[0]);
+        zz += (src[1] * param[1]);
+        zz += (src[2] * param[2]);
+        zz += (src[3] * param[3]);
+        zz += (src[4] * param[4]);
+    }
+#else
+    for (int32_t k=0; k<FIR_TAP_PREPARE; k++) {
+        zz += (p[(j+k) & mask] * param[k]);
+    }
+#endif
+
+    *out = zz;
 }
 
 #define FIR_TAP_COMB (9)
@@ -81,60 +97,64 @@ void LCWInputCombLines(float *out, float in, LCWReverbBlock *block)
     const uint32_t mask = buf->mask;
     const int32_t pointer = buf->pointer;
 
-    float tmp[LCW_REVERB_COMB_MAX];
+    float zn[LCW_REVERB_COMB_MAX];
     for (int32_t i=0; i<LCW_REVERB_COMB_MAX; i++) {
         float *p = buf->buffer + (LCW_REVERB_COMB_SIZE * i);
         const int32_t j = pointer + block->combDelaySize[i] - (FIR_TAP_COMB >> 1);
         const float fbGain = block->combFbGain[i];
         const float *param = combFirParams[i];
 
-        float zn = .0f;
-        for (int32_t k=0; k<FIR_TAP_COMB; k++) {
-            zn += (p[(uint32_t)(j + k) & mask] * param[k]);
+        float zz = .0f;
+#if FIR_TAP_COMB == 9
+        {
+            const float src[] = {
+                p[(j+0) & mask] + p[(j+8) & mask],
+                p[(j+1) & mask] + p[(j+7) & mask],
+                p[(j+2) & mask] + p[(j+6) & mask],
+                p[(j+3) & mask] + p[(j+5) & mask],
+                p[(j+4) & mask]
+            };
+
+            zz += (src[0] * param[0]);
+            zz += (src[1] * param[1]);
+            zz += (src[2] * param[2]);
+            zz += (src[3] * param[3]);
+            zz += (src[4] * param[4]);
         }
-
+#else
+        for (int32_t k=0; k<FIR_TAP_COMB; k++) {
+            zz += (p[(uint32_t)(j+k) & mask] * param[k]);
+        }
+#endif
         // フィードバックを加算
-        p[pointer] = in + (zn * fbGain);
+        p[pointer] = in + (zz * fbGain);
 
-        tmp[i] = zn;
+        zn[i] = zz;
     }
 
-    *out = tmp[0] - tmp[1] + tmp[2] - tmp[3];
+    *out = zn[0] - zn[1] + zn[2] - zn[3];
 }
 
-static fast_inline float inputAllPass(float in, LCWDelayBuffer *buf, int32_t delaySize, float fbGain)
+float LCWInputAllPass1(float in, LCWReverbBlock *block)
 {
+    LCWDelayBuffer *buf = &(block->apBuffer);
     buf->pointer = LCW_DELAY_BUFFER_DEC(buf);
-    const float zn = LCW_DELAY_BUFFER_LUT(buf, delaySize);
-    const float in2 = in - (zn * fbGain);
 
-    buf->buffer[buf->pointer] = in2;
-    return zn + (in2 * fbGain);
-}
-
-float LCWInputAllPass2(float in, LCWReverbBlock *block)
-{
-    const int32_t *delaySize = &(block->apDelaySize[0]);
-    const float *fbGain = &(block->apFbGain[0]);
+    const uint32_t mask = buf->mask;
+    const int32_t pointer = buf->pointer;
 
     float out = in;
-    for (int32_t i=0; i<LCW_REVERB_AP_MAX; i+=2) {
-        LCWDelayBuffer *buf = &(block->apBuffers[i]);
-        buf->pointer = LCW_DELAY_BUFFER_DEC(buf);
-        float zn = LCW_DELAY_BUFFER_LUT(buf, delaySize[i]);
+    for (int32_t i=0; i<LCW_REVERB_AP_MAX; i++) {
+        const int32_t delaySize = block->apDelaySize[i];
+        const float fbGain = block->apFbGain[i];
 
-        // 内側の処理
-        zn = inputAllPass(
-            zn, buf + 1, delaySize[i+1], fbGain[i+1]);
+        float *p = buf->buffer + (LCW_REVERB_AP_SIZE * i);
+        const float zn = p[(uint32_t)(pointer + delaySize) & mask];
 
-        // 外側の処理
-        {
-            const float in = out;
-            const float in2 = in - (zn * fbGain[i]);
+        const float in2 = out - (zn * fbGain);
+        p[pointer] = in2;
 
-            buf->buffer[buf->pointer] = in2;
-            out = zn + (in2 * fbGain[i]);
-        }
+        out = zn + (in2 * fbGain);
     }
 
     return out;

@@ -50,8 +50,8 @@ __unit_callback int8_t unit_init(const unit_runtime_desc_t * desc) {
     // (23)  // = 48000 * 0.0005
     const int32_t apDelay[] = {
         953, 241,
-        331, 81,
-        71, 23
+        81,
+        23
     };
 
     if (!desc)
@@ -145,18 +145,25 @@ __unit_callback void unit_render(const float * in, float * out, uint32_t frames)
 
     for (; out_p != out_e; in_p += 2, out_p += 2) {
         const float xL = *(in_p + 0);
-        // const float xR = *(in_p + 1);
+        const float xR = *(in_p + 1);
 
-        const float xL2 = LCWInputPreBuffer(xL * sendLevel, &reverbBlock);
+        const float tmp[] = {
+            xL * sendLevel,
+            xR * sendLevel
+        };
+
+        float preOut;
+        LCWInputPreBuffer(&preOut, tmp, &reverbBlock);
 
         float combSum;
-        LCWInputCombLines(&combSum, xL2, &reverbBlock);
+        LCWInputCombLines(&combSum, preOut, &reverbBlock);
 
-        const float wL = LCWInputAllPass2(combSum, &reverbBlock);
-        const float yL = softclip( (dry * xL) + (wet * wL) );
+        const float out = LCWInputAllPass1(combSum, &reverbBlock);
+        const float yL = softclip( (dry * xL) + (wet * out) );
+        const float yR = softclip( (dry * xR) + (wet * out) );
 
         out_p[0] = yL;
-        out_p[1] = yL;
+        out_p[1] = yR;
     }
 }
 
